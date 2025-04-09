@@ -1,0 +1,2 @@
+# ELN SMW Adapter
+A webservice to collect experiment data from various ELN (electronic lab notebook) and insert into SMW (Semantic MediaWiki) with a unified data structure. This tool uses a simple plugin architecture to flexibly adapt to different data sources.

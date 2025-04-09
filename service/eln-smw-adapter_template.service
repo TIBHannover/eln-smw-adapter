@@ -1,0 +1,15 @@
+[Unit]
+Description=ELN SMW Adapter
+After=network.target
+
+[Service]
+Type=simple
+User=your_username
+WorkingDirectory=/opt/eln-smw-adapter
+ExecStart=/opt/eln-smw-adapter/venv/bin/python3 /opt/eln-smw-adapter/app.py
+Restart=on-failure
+RestartSec=1
+Environment="PATH=/opt/eln-smw-adapter/venv/bin/"
+
+[Install]
+WantedBy=multi-user.target
