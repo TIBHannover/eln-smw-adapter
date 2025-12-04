@@ -166,6 +166,7 @@ class Plugin:
             # File structure
             'parameter_name_row': 0,  # Will be converted to 0-based
             'protocol_type': protocol_type,  # Use extracted protocol type
+            'sheet_name': None,  # Sheet name for Excel files (default: first sheet)
 
             # Protocol metadata
             'date': None,
@@ -250,9 +251,28 @@ class Plugin:
             df = pd.read_csv(file_path, sep=delimiter, header=None)
             self.adapter.logger.log_message('info', 'CSV file loaded with delimiter: "{}"'.format(delimiter))
         else:  # excel (xlsx, xls)
-            # Always read first sheet (index 0), all columns
-            df = pd.read_excel(file_path, sheet_name=0, header=None)
-            self.adapter.logger.log_message('info', 'Excel file loaded from first sheet')
+            # Determine sheet to read
+            sheet = cfg.get('sheet_name') if cfg.get('sheet_name') else 0
+
+            try:
+                df = pd.read_excel(file_path, sheet_name=sheet, header=None)
+                if isinstance(sheet, str):
+                    self.adapter.logger.log_message('info', 'Excel file loaded from sheet: "{}"'.format(sheet))
+                else:
+                    self.adapter.logger.log_message('info', 'Excel file loaded from first sheet')
+            except ValueError as e:
+                # Sheet name not found
+                try:
+                    # Get available sheet names for error message
+                    xl_file = pd.ExcelFile(file_path)
+                    available_sheets = xl_file.sheet_names
+                    error_msg = 'Sheet "{}" not found. Available sheets: {}'.format(sheet, ', '.join(available_sheets))
+                    self.adapter.add_message('error', error_msg)
+                    self.adapter.logger.log_message('error', error_msg)
+                except:
+                    self.adapter.add_message('error', 'Failed to read Excel file: {}'.format(str(e)))
+                    self.adapter.logger.log_message('error', 'Failed to read Excel file: {}'.format(str(e)))
+                raise
 
         # Auto-trim columns at first empty header (if parameter_name_row is configured)
         if 'parameter_name_row' in cfg and cfg['parameter_name_row'] is not None:
