@@ -114,3 +114,50 @@ class SemanticMediaWikiApiHandler:
         except KeyError:
             print("Edit result missing in response.")
             return False
+
+    def get_page_content(self, title):
+        """Get the content of a wiki page by title"""
+        params = {
+            'action': 'query',
+            'titles': title,
+            'prop': 'revisions',
+            'rvprop': 'content',
+            'rvslots': 'main',
+            'format': 'json'
+        }
+        try:
+            response = self.session.get(self.api_url, params=params)
+            response.raise_for_status()
+            result = response.json()
+
+            # Extract page content from the response
+            pages = result.get('query', {}).get('pages', {})
+            for page_id, page_data in pages.items():
+                if page_id == '-1':
+                    # Page does not exist
+                    return None
+                if 'revisions' in page_data:
+                    return page_data['revisions'][0]['slots']['main']['*']
+
+            return None
+        except requests.RequestException as e:
+            print(f"Get page content request failed: {e}")
+            return None
+        except (KeyError, IndexError):
+            print("Failed to extract page content from response.")
+            return None
+
+    def test_connection(self):
+        """Test the connection to MediaWiki API"""
+        test_params = {
+            'action': 'query',
+            'meta': 'siteinfo',
+            'format': 'json'
+        }
+        try:
+            response = self.session.get(self.api_url, params=test_params)
+            response.raise_for_status()
+            result = response.json()
+            return 'query' in result and 'general' in result['query']
+        except Exception:
+            return False
