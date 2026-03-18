@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import datetime
 import re
+import time
 
 class Plugin:
     def __init__(self, config, adapter):
@@ -9,17 +10,51 @@ class Plugin:
         self.config = config
         self.adapter = adapter
 
+    def get_info(self):
+        """Return plugin metadata including form fields for user input"""
+        return {
+            'fields': [
+                {
+                    'name': 'protocol_type',
+                    'label': 'Protocol Type',
+                    'type': 'select',
+                    'required': True,
+                    'options': self.get_available_protocol_types()
+                }
+            ]
+        }
+
+    def get_available_protocol_types(self):
+        """Query SMW for available protocol type configurations"""
+        try:
+            # Query for all protocol type pages that have the adapter config property set
+            # Property is only set if config page exists
+            ask_query = '[[SMWAdapterConfig_SpreadsheetLocalGeneric::+]]'
+            result = self.adapter.smw_api.ask(ask_query)
+
+            protocol_types = []
+            if result and result.get('query') and result['query'].get('results'):
+                for page_data in result['query']['results'].values():
+                    protocol_type = page_data['fulltext']
+                    protocol_types.append(protocol_type)
+
+            self.adapter.logger.log_message('info', 'Found {} protocol types for {}'.format(len(protocol_types), self.name))
+            return protocol_types
+        except Exception as e:
+            self.adapter.logger.log_message('error', 'Failed to get protocol types: {}'.format(str(e)))
+            return []
+
     def run(self, filename):
         self.adapter.logger.log_message('info', 'Running plugin {} with filename {}'.format(self.name, filename))
 
-        # Extract protocol type from filename
-        protocol_type = self.extract_protocol_type(filename)
+        # Get protocol type from request data
+        protocol_type = self.adapter.data.get('protocol_type')
         if not protocol_type:
-            self.adapter.add_message('error', 'Could not extract protocol type from filename: {}'.format(filename))
-            self.adapter.logger.log_message('error', 'Failed to extract protocol type from filename: {}'.format(filename))
+            self.adapter.add_message('error', 'Protocol type not provided in request data')
+            self.adapter.logger.log_message('error', 'Protocol type missing from request data')
             return None
 
-        self.adapter.logger.log_message('info', 'Extracted protocol type: {}'.format(protocol_type))
+        self.adapter.logger.log_message('info', 'Using protocol type: {}'.format(protocol_type))
 
         # Check if protocol type exists in wiki
         if not self.check_protocol_type_exists(protocol_type):
@@ -212,6 +247,9 @@ class Plugin:
         # Auto-detect mode based on metadata format
         cfg['mode'] = self.detect_mode(cfg)
 
+        # Log the config for debugging
+        self.adapter.logger.log_message('info', 'Config loaded: parameter_name_unit_pattern="{}"'.format(cfg.get('parameter_name_unit_pattern', 'NOT SET')))
+
         return cfg
 
     def get_config(self):
@@ -223,15 +261,8 @@ class Plugin:
         raise NotImplementedError("Configuration must be loaded from wiki via get_config_from_wiki()")
 
     def detect_mode(self, cfg):
-        """Auto-detect mode based on whether metadata are cells or columns"""
-        # If date is a cell reference (e.g., B1), it's single mode
-        # If it's a column reference (e.g., B or column name), it's multiple mode
-        if cfg['date']:
-            if self.is_cell_reference(cfg['date']):
-                return 'single'
-            else:
-                return 'multiple'
-        # Default to single if no date specified
+        """Auto-detect mode: always single (one protocol with multiple specimens per file)"""
+        # Single mode supports both cell references and column references for specimen data
         return 'single'
 
     def is_cell_reference(self, ref):
@@ -305,6 +336,9 @@ class Plugin:
         # Get parameter names first (needed for column-based metadata)
         parameter_names = df.iloc[cfg['parameter_name_row'], :].tolist()
 
+        # Store units extracted from parameter names (key: mapped name, value: unit)
+        self.parameter_units = {}
+
         # Apply parameter name replacements with validation
         if cfg['parameter_name_replace']:
             parameter_names = self.apply_parameter_name_replacements(
@@ -326,7 +360,7 @@ class Plugin:
         metadata['specimen_material'] = self.get_metadata_value(df, cfg['specimen_material']) or '?'
 
         # Person (use adapter.user if not specified)
-        metadata['person'] = self.get_metadata_value(df, cfg['person']) or (self.adapter.user if self.adapter.user else '')
+        metadata['person'] = self.get_metadata_value(df, cfg['person']) or self.adapter.data.get('user', '')
 
         # Build origin internal identifier from pattern
         metadata['filename'] = filename
@@ -367,6 +401,9 @@ class Plugin:
         exclude_params = [p.strip() for p in cfg['parameter_exclude'].split(',') if p.strip()]
         exclude_params.extend(metadata_columns_to_exclude)
 
+        specimen_create_time = 0
+        record_create_time = 0
+
         for index, row in data_rows.iterrows():
             # Get specimen description
             specimen_description = self.get_metadata_value(df, desc_col_ref, row, parameter_names) if desc_col_ref else row.iloc[0]
@@ -375,12 +412,20 @@ class Plugin:
             if not specimen_description or pd.isna(specimen_description) or specimen_description == '':
                 continue
 
+            # Get specimen material from row if column reference, otherwise use metadata
+            if cfg['specimen_material'] and not self.is_cell_reference(cfg['specimen_material']):
+                specimen_material = self.get_metadata_value(df, cfg['specimen_material'], row, parameter_names) or '?'
+            else:
+                specimen_material = metadata['specimen_material']
+
             # Create specimen
             specimen = {}
             specimen['Person'] = metadata['person']
             specimen['Description'] = str(specimen_description)
-            specimen['Material'] = metadata['specimen_material']
+            specimen['Material'] = specimen_material
+            t_start = time.time()
             specimen['Name'] = self.adapter.create_smw_page('Specimen', specimen)
+            specimen_create_time += (time.time() - t_start)
             specimen_list.append(specimen)
 
             self.adapter.logger.log_message('info', 'Iteration {}: Created specimen {} (Description: {}) - Total in list: {}'.format(index, specimen['Name'], specimen_description, len(specimen_list)))
@@ -399,9 +444,11 @@ class Plugin:
 
                 value = row.iloc[col_idx]
                 if pd.notna(value) and value != '':
-                    # Handle units
-                    if cfg['parameter_name_unit_pattern']:
-                        param_name, value = self.extract_unit_from_header(param_name, value, cfg['parameter_name_unit_pattern'])
+                    # Append unit if one was extracted for this parameter
+                    if param_name in self.parameter_units:
+                        unit = self.parameter_units[param_name]
+                        value = f"{value} {unit}"
+                        self.adapter.logger.log_message('info', 'Unit added to {}: "{}"'.format(param_name, value))
                     record['Data'][param_name] = value
 
             record_list.append(record)
@@ -414,8 +461,13 @@ class Plugin:
         # Create records with protocol name
         for record in record_list:
             record['Protocol'] = protocol_name
+            t_start = time.time()
             record['Name'] = self.adapter.create_smw_page('Record', record)
+            record_create_time += (time.time() - t_start)
 
+        self.adapter.logger.log_message('info', 'Timing: Specimen creation {:.2f}s, Record creation {:.2f}s, Total {:.2f}s'.format(
+            specimen_create_time, record_create_time, specimen_create_time + record_create_time
+        ))
         self.adapter.logger.log_message('info', 'Successfully processed file with {} specimens'.format(len(specimen_list)))
         self.adapter.add_message('info', 'Successfully processed {} specimens and {} records'.format(len(specimen_list), len(record_list)))
 
@@ -471,7 +523,7 @@ class Plugin:
                 metadata['specimen_material'] = self.get_metadata_value(df, cfg['specimen_material'], row, parameter_names) or '?'
 
                 # Person
-                metadata['person'] = self.get_metadata_value(df, cfg['person'], row, parameter_names) or (self.adapter.user if self.adapter.user else '')
+                metadata['person'] = self.get_metadata_value(df, cfg['person'], row, parameter_names) or self.adapter.data.get('user', '')
 
                 # Description
                 metadata['specimen_description'] = self.get_metadata_value(df, cfg['specimen_description'], row, parameter_names) or '?'
@@ -650,8 +702,9 @@ class Plugin:
                 actual_name = ''
 
             # Extract unit from actual name if unit pattern is configured
+            extracted_unit = None
             if unit_pattern:
-                actual_name_clean, _ = self.extract_unit_from_header(actual_name, '', unit_pattern)
+                actual_name_clean, extracted_unit = self.extract_unit_from_header_only(actual_name, unit_pattern)
             else:
                 actual_name_clean = actual_name
 
@@ -663,10 +716,33 @@ class Plugin:
                     f"File structure may have changed. Please update configuration."
                 )
 
-            # Replace with new name
+            # Replace with new name and store unit
             new_names[col_idx] = repl['new_name']
+            if extracted_unit:
+                self.parameter_units[repl['new_name']] = extracted_unit
 
         return new_names
+
+    def extract_unit_from_header_only(self, param_name, pattern):
+        """Extract unit from parameter name using regex pattern, return clean name and unit"""
+        if not pattern:
+            return param_name, None
+
+        unit_match = re.search(pattern, str(param_name))
+        if unit_match:
+            # Get the first non-None group (the captured unit)
+            unit = None
+            for group in unit_match.groups():
+                if group:
+                    unit = group
+                    break
+
+            if unit:
+                # Remove the matched portion from parameter name
+                clean_name = re.sub(pattern, '', str(param_name)).strip()
+                return clean_name, unit
+
+        return param_name, None
 
     def extract_unit_from_header(self, param_name, value, pattern):
         """Extract unit from parameter name using regex pattern and add to value"""
