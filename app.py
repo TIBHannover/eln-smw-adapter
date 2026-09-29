@@ -70,5 +70,5 @@ def plugin_info(plugin_name):
     adapter = Adapter()
     return jsonify(adapter.get_plugin_info(plugin_name))
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# No app.run() here: the service is started via gunicorn (see Dockerfile and service/).
+# Use a single worker, as async jobs run in-process.

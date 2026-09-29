@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=your_username
 WorkingDirectory=/opt/eln-smw-adapter
-ExecStart=/opt/eln-smw-adapter/venv/bin/python3 /opt/eln-smw-adapter/app.py
+ExecStart=/opt/eln-smw-adapter/venv/bin/gunicorn --workers 1 --threads 8 --timeout 300 --bind 127.0.0.1:5000 app:app
 Restart=on-failure
 RestartSec=1
 Environment="PATH=/opt/eln-smw-adapter/venv/bin/"

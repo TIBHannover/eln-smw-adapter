@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import os
 import importlib
-import configparser
 import re
 import datetime
 import platform
@@ -9,6 +8,7 @@ import time
 
 from smw_api_handler import SemanticMediaWikiApiHandler
 from logger import Logger
+from config_loader import load_config, get_version
 
 import warnings  # dismiss the Unverified HTTPS request warning
 # warnings.filterwarnings('ignore', message='Unverified HTTPS request')
@@ -16,10 +16,8 @@ import warnings  # dismiss the Unverified HTTPS request warning
 class Adapter:
     def __init__(self):
         self.logger = Logger()
-        self.config = configparser.ConfigParser(interpolation=None)
-        # Preserve case for option names
-        self.config.optionxform = str
-        self.config.read(os.path.join(os.path.dirname(__file__), 'config/config.ini'))
+        self.config = load_config()
+        self.version = get_version()
         self.debug_mode = self.config.get('Main', 'debug_mode', fallback='off').lower() == 'on'
         self.smw_api = SemanticMediaWikiApiHandler(self.config)
         self.smw_pages = {} # Dictionary of created wiki pages with name and content for response
@@ -48,7 +46,7 @@ class Adapter:
 
             # Response object contains adapter version, created smw pages and messages with info, warnings and errors
             response = {}
-            response['version'] = self.config['Main']['version']
+            response['version'] = self.version
             response['smw_pages'] = self.smw_pages
             response['messages'] = self.messages
             return response
@@ -59,7 +57,7 @@ class Adapter:
 
             # Return error response
             response = {}
-            response['version'] = self.config['Main']['version']
+            response['version'] = self.version
             response['smw_pages'] = {}
             response['messages'] = [{'type': 'error', 'text': str(e)}]
             return response
@@ -182,7 +180,7 @@ class Adapter:
         status = {
             'status': 'running',
             'timestamp': datetime.datetime.now().isoformat(),
-            'version': self.config.get('Main', 'version'),
+            'version': self.version,
             'platform': platform.system(),
             'python_version': platform.python_version(),
         }
