@@ -76,7 +76,8 @@ class Plugin:
         configuration.api_key_prefix['api_key'] = 'Authorization'
         configuration.host = self.config['eLabFTW']['api_url']
         configuration.debug = False
-        configuration.verify_ssl = False
+        # Certificates are verified by default; disable for instances with self-signed certificates
+        configuration.verify_ssl = self.config.getboolean(self.name, 'verify_ssl', fallback=True)
 
         # create an instance of the API class
         api_client = elabapi_python.ApiClient(configuration)
@@ -137,7 +138,7 @@ class Plugin:
 
         # Remove items that are excluded in config
         for dictionary in all_table_dicts:
-            keys_to_remove = self.config.get(self.name, 'exclude').split(',')
+            keys_to_remove = self.config.get(self.name, 'exclude', fallback='').split(',')
             for key in keys_to_remove:
                 dictionary.pop(key, None)
 
