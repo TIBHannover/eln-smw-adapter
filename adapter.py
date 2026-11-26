@@ -148,6 +148,8 @@ class Adapter:
             if data and "query" in data and "results" in data["query"]:
                 results = data["query"]["results"]
                 self.logger.log_message('info', 'CHECK: Found {} candidate specimens'.format(len(results)))
+                if not results:
+                    return None
                 # SMW query is case-insensitive, so check printout for exact case match
                 for page_key, page_data in results.items():
                     page_title = page_data['fulltext']
