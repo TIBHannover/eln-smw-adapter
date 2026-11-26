@@ -26,11 +26,16 @@ Environment variables take precedence over `config/config.ini`, which is optiona
 | --- | --- | --- |
 | `SMW_API_URL`, `SMW_USERNAME`, `SMW_PASSWORD` | `[SMW]` | Semantic MediaWiki API and bot credentials |
 | `DEBUG_MODE` | `[Main] debug_mode` | `on` creates no pages, only reports them |
+| `PLUGINS_VERSION` | – | Version of mounted plugins, reported by `/status` as `plugins_version` |
 | `UPLOAD_PATH` | `[Main] upload_path` | Upload directory (default `./uploads`) |
 | `ENABLED_PLUGINS` | `[Plugins]` | Comma separated plugin names, e.g. `eLabFTW,Excel-local` |
 | `<PLUGIN>_<OPTION>` | `[<Plugin>] <option>` | Plugin options for enabled plugins, e.g. `ELABFTW_API_URL`, `ELABFTW_API_KEY`, `ELABFTW_VERIFY_SSL`, `EXCEL_LOCAL_TYPE`. Non-alphanumeric characters in the plugin name become `_`. |
 
 TLS certificates of eLabFTW are verified by default. Set `ELABFTW_VERIFY_SSL=off` (or `verify_ssl = off`) for instances with self-signed certificates.
+
+### Dry run
+
+Send `"dry_run": true` in the `data` object of `/adapt` or `/adapt-async` to run a plugin without writing to the wiki. The response lists the pages that would be created and contains `"dry_run": true`. Page numbers are a forecast: they can change if other pages are created before the real import. `/status` lists `dry_run` in `features`, so clients can check that the adapter supports it.
 
 CORS is not enabled; the adapter is meant to be called by backend services, not directly from browsers.
 

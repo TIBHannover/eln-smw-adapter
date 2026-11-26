@@ -25,11 +25,13 @@ class Adapter:
         self.source = None
         self.data = {} # Additional data from request (user, fields, etc.)
         self.page_index_cache = {} # Cache for page indices to avoid race conditions
+        self.dry_run = False # Per request: plan the pages but write nothing to the wiki
 
     def adapt(self, eln, id, data=None):
         self.data = data if data else {}
+        self.dry_run = self.data.get('dry_run') is True
         user = self.data.get('user', 'unknown')
-        self.logger.log_message('info', 'Call for Plugin {} with page id {} by user {}'.format(eln, id, user))
+        self.logger.log_message('info', 'Call for Plugin {} with page id {} by user {}{}'.format(eln, id, user, ' (dry run)' if self.dry_run else ''))
 
         try:
             # import and run plugin dynamically by determined by eln parameter
@@ -47,6 +49,7 @@ class Adapter:
             # Response object contains adapter version, created smw pages and messages with info, warnings and errors
             response = {}
             response['version'] = self.version
+            response['dry_run'] = self.dry_run
             response['smw_pages'] = self.smw_pages
             response['messages'] = self.messages
             return response
@@ -58,6 +61,7 @@ class Adapter:
             # Return error response
             response = {}
             response['version'] = self.version
+            response['dry_run'] = self.dry_run
             response['smw_pages'] = {}
             response['messages'] = [{'type': 'error', 'text': str(e)}]
             return response
@@ -100,8 +104,8 @@ class Adapter:
 
         self.logger.log_message('info', 'Create SMW page of category {} with title {}'.format(category, new_title))
 
-        if self.debug_mode:
-            self.logger.log_message('info', '[DEBUG MODE] Page {} would be created with content: {}'.format(new_title, text[:100]))
+        if self.debug_mode or self.dry_run:
+            self.logger.log_message('info', '[{}] Page {} would be created with content: {}'.format('DRY RUN' if self.dry_run else 'DEBUG MODE', new_title, text[:100]))
             self.smw_pages[new_title] = text
         else:
             t_edit = time.time()
@@ -183,6 +187,9 @@ class Adapter:
             'version': self.version,
             'platform': platform.system(),
             'python_version': platform.python_version(),
+            'features': ['dry_run'],
+            # Version of the mounted plugin repo, set by the deployment (empty: plugins of the image)
+            'plugins_version': os.environ.get('PLUGINS_VERSION', ''),
         }
         
         # Test SMW API connection
